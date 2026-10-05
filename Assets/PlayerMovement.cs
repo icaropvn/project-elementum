@@ -4,8 +4,11 @@ using UnityEngine.InputSystem;
 public class PlayerMovement : MonoBehaviour
 {
     public Rigidbody2D rb;
+    private Vector3 respawnPosition;
     public Animator animator;
     bool isFacingRight = true;
+    public ParticleSystem smokeFX;
+    public DeathCounterUI deathCounter;
 
     [Header("Gravity")]
     public float baseGravity = 2f;
@@ -47,6 +50,16 @@ public class PlayerMovement : MonoBehaviour
     float wallJumpTimer;
     public Vector2 wallJumpPower = new Vector2(5f, 10f);
 
+    void Start()
+    {
+        respawnPosition = transform.position;
+
+        hasDoubleJump = PlayerPrefs.GetInt("HasDoubleJump", 0) == 1;
+        hasWallJump = PlayerPrefs.GetInt("HasWallJump", 0) == 1;
+
+        jumpsRemaining = GetMaxJumps();
+    }
+
     void Update()
     {
         ProcessGravity();
@@ -68,6 +81,14 @@ public class PlayerMovement : MonoBehaviour
         animator.SetBool("isWallSliding", isWallSliding);
     }
 
+    private void OnTriggerEnter2D(Collider2D collision)
+    {
+        if (collision.gameObject.layer == LayerMask.NameToLayer("Hazard"))
+        {
+            Die();
+        }
+    }
+
     public void Move(InputAction.CallbackContext context)
     {
         horizontalMovement = context.ReadValue<Vector2>().x;
@@ -77,16 +98,26 @@ public class PlayerMovement : MonoBehaviour
     {
         if (context.performed && jumpsRemaining > 0)
         {
+            bool jumpedFromGround = isGrounded;
+
             rb.linearVelocity = new Vector2(rb.linearVelocity.x, jumpPower);
             jumpsRemaining--;
             animator.SetTrigger("jump");
+
+            SFXManager.Instance.Play(
+                SFXManager.Instance.jumpSound
+            );
+
+            if (jumpedFromGround)
+            {
+                smokeFX.Play();
+            }
         }
 
-        // pulo curto
+        // short jump
         if (context.canceled && rb.linearVelocity.y > 0)
         {
             rb.linearVelocity = new Vector2(rb.linearVelocity.x, rb.linearVelocity.y * 0.5f);
-            animator.SetTrigger("jump");
         }
 
         // wall jump
@@ -96,6 +127,11 @@ public class PlayerMovement : MonoBehaviour
             rb.linearVelocity = new Vector2(wallJumpDirection * wallJumpPower.x, wallJumpPower.y);
             wallJumpTimer = 0;
             animator.SetTrigger("jump");
+            smokeFX.Play();
+
+            SFXManager.Instance.Play(
+                SFXManager.Instance.jumpSound
+            );
 
             // force flip
             if (transform.localScale.x != wallJumpDirection)
@@ -108,6 +144,23 @@ public class PlayerMovement : MonoBehaviour
 
             Invoke(nameof(CancelWallJump), wallJumpTime + 0.1f);
         }
+    }
+
+    private void Die()
+    {
+        SFXManager.Instance.Play(
+            SFXManager.Instance.deathSound
+        );
+
+        deathCounter.AddDeath();
+
+        transform.position = respawnPosition;
+        rb.linearVelocity = Vector2.zero;
+    }
+
+    public void SetCheckpoint(Vector3 newCheckpoint)
+    {
+        respawnPosition = newCheckpoint;
     }
 
     private void ProcessGravity()
@@ -128,7 +181,7 @@ public class PlayerMovement : MonoBehaviour
         wasGrounded = isGrounded;
         isGrounded = Physics2D.OverlapBox(groundCheckPosition.position, groundCheckSize, 0, groundLayer);
 
-        // acabou de aterrissar
+        // has just landed
         if (isGrounded && !wasGrounded)
         {
             jumpsRemaining = GetMaxJumps();
@@ -193,7 +246,33 @@ public class PlayerMovement : MonoBehaviour
             Vector3 ls = transform.localScale;
             ls.x *= -1f;
             transform.localScale = ls;
+
+            if (rb.linearVelocity.y == 0)
+            {
+                smokeFX.Play();
+            }
         }
+    }
+
+    public void UnlockDoubleJump()
+    {
+        hasDoubleJump = true;
+
+        PlayerPrefs.SetInt("HasDoubleJump", 1);
+        PlayerPrefs.Save();
+
+        if (isGrounded)
+        {
+            jumpsRemaining = GetMaxJumps();
+        }
+    }
+
+    public void UnlockWallJump()
+    {
+        hasWallJump = true;
+
+        PlayerPrefs.SetInt("HasWallJump", 1);
+        PlayerPrefs.Save();
     }
 
     private void OnDrawGizmosSelected()
